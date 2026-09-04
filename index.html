@@ -31,6 +31,9 @@ const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx0aGX_D
 // Where the map opens before it knows your places.
 const HOME_VIEW = { lat: 7.30, lng: 80.65, zoom: 8 };   // Sri Lanka
 
+// Which row in the sheet holds the column names. Data starts on the row after it.
+const HEADER_ROW = 3;   
+
 // Pin colours per category. Add your own; anything unlisted gets a default.
 const CATEGORY_COLOURS = {
   temple:     "#E8A33D",
@@ -706,8 +709,16 @@ const CATEGORY_COLOURS = {
     fetch(url)
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then((text) => {
-        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-        start(parsed.data);
+        const rows = Papa.parse(text, { skipEmptyLines: false }).data;
+        const table = rows.slice(HEADER_ROW - 1)
+                          .filter((r) => r.some((c) => String(c).trim() !== ""));
+        const head = (table.shift() || []).map((h) => String(h).trim());
+
+        start(table.map((cells) => {
+          const row = {};
+          head.forEach((h, i) => { if (h) row[h] = cells[i]; });
+          return row;
+        }));
       })
       .catch(() => {
         $("list").innerHTML = '<p class="notice">Could not read the sheet. Two things to check: ' +
