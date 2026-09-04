@@ -1,0 +1,720 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Where I've been</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Karla:wght@400;500;700&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+
+<script>
+/* ============================================================
+   SETTINGS — this is the only part you need to edit.
+
+   1. In your Google Sheet:  File > Share > Publish to web
+      Choose the sheet tab, choose "Comma-separated values (.csv)",
+      click Publish, then copy the link it gives you.
+   2. Paste that link between the quotes below.
+
+   Leave it empty and the map runs on built-in sample places
+   so you can see how it works first.
+   ============================================================ */
+
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx0aGX_DIMCArqpJxPSYA21Vy0TF4QTm8wz0_J9z-8OI676KmGoc0lueZzGIdCpLScr6nOP-Rjrm5g/pub?gid=0&single=true&output=csv";
+
+// Where the map opens before it knows your places.
+const HOME_VIEW = { lat: 7.30, lng: 80.65, zoom: 8 };   // Sri Lanka
+
+// Pin colours per category. Add your own; anything unlisted gets a default.
+const CATEGORY_COLOURS = {
+  temple:     "#E8A33D",
+  beach:      "#48B8C4",
+  hike:       "#7FB069",
+  waterfall:  "#5C9EAD",
+  city:       "#D77A61",
+  restaurant: "#C9639A",
+  hotel:      "#8E7CC3",
+  museum:     "#B3925A",
+  park:       "#6AA84F",
+  other:      "#9AA7A1"
+};
+</script>
+
+<style>
+  :root {
+    --ink:        #0F241C;
+    --ink-soft:   #1A362B;
+    --paper:      #EDE8DA;
+    --paper-dim:  #A8B3AC;
+    --marigold:   #E8A33D;
+    --line:       rgba(237, 232, 218, 0.16);
+    --panel-w:    22.5rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: Karla, system-ui, sans-serif;
+    background: var(--ink);
+    color: var(--paper);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    left: var(--panel-w);
+    background: var(--ink);
+  }
+
+  /* ---------- panel ---------- */
+
+  .panel {
+    position: absolute;
+    top: 0; left: 0; bottom: 0;
+    width: var(--panel-w);
+    display: flex;
+    flex-direction: column;
+    background: var(--ink);
+    border-right: 1px solid var(--line);
+    z-index: 800;
+  }
+
+  .panel-head {
+    padding: 1.6rem 1.5rem 1.1rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .panel-head h1 {
+    margin: 0;
+    font-family: Fraunces, Georgia, serif;
+    font-weight: 600;
+    font-size: 1.9rem;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+  }
+
+  .tally {
+    display: flex;
+    gap: 1.4rem;
+    margin-top: 1rem;
+  }
+
+  .tally div { line-height: 1.15; }
+
+  .tally b {
+    display: block;
+    font-family: Fraunces, Georgia, serif;
+    font-weight: 600;
+    font-size: 1.45rem;
+    color: var(--marigold);
+  }
+
+  .tally span {
+    font-size: 0.75rem;
+    color: var(--paper-dim);
+  }
+
+  /* ---------- filters ---------- */
+
+  .filters {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .filters-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.55rem;
+  }
+
+  input, select {
+    width: 100%;
+    padding: 0.55rem 0.65rem;
+    font: inherit;
+    font-size: 0.87rem;
+    color: var(--paper);
+    background: var(--ink-soft);
+    border: 1px solid var(--line);
+    border-radius: 0.35rem;
+  }
+
+  input::placeholder { color: var(--paper-dim); }
+
+  select {
+    appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--paper-dim) 50%),
+                      linear-gradient(135deg, var(--paper-dim) 50%, transparent 50%);
+    background-position: right 0.85rem center, right 0.6rem center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 1.7rem;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--marigold);
+    outline-offset: 1px;
+  }
+
+  /* ---------- list ---------- */
+
+  .list {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .place {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.85rem 1.5rem;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .place:hover, .place:focus-visible { background: var(--ink-soft); }
+
+  .place-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+  }
+
+  .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    flex: none;
+    transform: translateY(-1px);
+  }
+
+  .place-meta {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    color: var(--paper-dim);
+  }
+
+  .again {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--ink);
+    background: var(--marigold);
+    border-radius: 1rem;
+    padding: 0.05rem 0.4rem;
+    margin-left: auto;
+  }
+
+  .notice {
+    padding: 1.5rem;
+    font-size: 0.87rem;
+    line-height: 1.55;
+    color: var(--paper-dim);
+  }
+
+  .notice code {
+    font-size: 0.8rem;
+    color: var(--marigold);
+    word-break: break-all;
+  }
+
+  /* ---------- pins ---------- */
+
+  .pin {
+    width: 1.05rem;
+    height: 1.05rem;
+    border-radius: 50%;
+    border: 2px solid rgba(15, 36, 28, 0.85);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .pin-count {
+    position: absolute;
+    top: -0.45rem;
+    right: -0.45rem;
+    min-width: 0.95rem;
+    height: 0.95rem;
+    padding: 0 0.15rem;
+    border-radius: 1rem;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 0.95rem;
+    text-align: center;
+  }
+
+  .marker-cluster {
+    background: rgba(232, 163, 61, 0.28);
+    border-radius: 50%;
+  }
+
+  .marker-cluster div {
+    width: 1.9rem;
+    height: 1.9rem;
+    margin: 0.25rem;
+    border-radius: 50%;
+    background: var(--marigold);
+    color: var(--ink);
+    font: 700 0.8rem/1.9rem Karla, sans-serif;
+    text-align: center;
+  }
+
+  /* ---------- popup ---------- */
+
+  .leaflet-popup-content-wrapper {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 0.5rem;
+  }
+
+  .leaflet-popup-tip { background: var(--ink); }
+
+  .leaflet-popup-content {
+    margin: 0.95rem 1.05rem;
+    width: 15.5rem !important;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  .pop-name {
+    font-family: Fraunces, Georgia, serif;
+    font-size: 1.15rem;
+    font-weight: 600;
+    line-height: 1.15;
+  }
+
+  .pop-where {
+    color: var(--paper-dim);
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+  }
+
+  .visit {
+    border-top: 1px solid var(--line);
+    margin-top: 0.7rem;
+    padding-top: 0.6rem;
+  }
+
+  .visit-when {
+    font-weight: 700;
+    color: var(--marigold);
+  }
+
+  .visit-when small {
+    font-weight: 400;
+    color: var(--paper-dim);
+    margin-left: 0.35rem;
+  }
+
+  .visit p { margin: 0.15rem 0 0; }
+
+  .visit a { color: var(--marigold); }
+
+  /* ---------- mobile ---------- */
+
+  .toggle {
+    display: none;
+    position: absolute;
+    z-index: 900;
+    bottom: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.6rem 1.2rem;
+    border: 0;
+    border-radius: 2rem;
+    background: var(--marigold);
+    color: var(--ink);
+    font: 700 0.9rem Karla, sans-serif;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+  }
+
+  @media (max-width: 46rem) {
+    #map { left: 0; }
+
+    .panel {
+      top: auto;
+      width: 100%;
+      height: 72%;
+      border-right: 0;
+      border-top: 1px solid var(--line);
+      border-radius: 0.9rem 0.9rem 0 0;
+      transition: transform 0.22s ease;
+    }
+
+    .panel[hidden] {
+      display: flex;
+      transform: translateY(100%);
+    }
+
+    .toggle { display: block; }
+    .panel-head { padding-top: 1.1rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<div class="panel" id="panel">
+  <div class="panel-head">
+    <h1>Where I've been</h1>
+    <div class="tally" id="tally"></div>
+  </div>
+
+  <div class="filters">
+    <input id="q" type="search" placeholder="Search a place">
+    <div class="filters-row">
+      <select id="fCategory"><option value="">All kinds</option></select>
+      <select id="fYear"><option value="">All years</option></select>
+    </div>
+    <select id="fWith"><option value="">Anyone</option></select>
+  </div>
+
+  <div class="list" id="list">
+    <p class="notice">Loading your places…</p>
+  </div>
+</div>
+
+<button class="toggle" id="toggle">Show list</button>
+<div id="map"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- column names this page understands ----------
+
+  const FIELDS = {
+    place:    ["place_name", "place", "name"],
+    country:  ["country"],
+    area:     ["area", "city", "city_area", "region", "district"],
+    lat:      ["latitude", "lat"],
+    lng:      ["longitude", "lng", "lon", "long"],
+    category: ["category", "kind", "type"],
+    date:     ["visit_date", "date", "visited"],
+    withWhom: ["with_whom", "with", "companions", "people"],
+    notes:    ["notes", "note", "comment", "comments", "visit_notes"],
+    rating:   ["rating", "score"],
+    photo:    ["photo_link", "photo", "photos", "photo_url", "link"],
+    trip:     ["trip_name", "trip"]
+  };
+
+  const SAMPLE = [
+    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", area: "Kandy",
+      latitude: 7.29379, longitude: 80.64127, category: "temple",
+      visit_date: "2023-04-14", with_whom: "Family", rating: "5",
+      notes: "Evening thevava. Arrived an hour early for a spot near the front." },
+    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", area: "Kandy",
+      latitude: 7.29379, longitude: 80.64127, category: "temple",
+      visit_date: "2025-08-02", with_whom: "Chamodya, Randika",
+      notes: "Second time. Quieter on a weekday morning." },
+    { place_name: "Sigiriya", country: "Sri Lanka", area: "Matale",
+      latitude: 7.95700, longitude: 80.75980, category: "hike",
+      visit_date: "2024-01-20", with_whom: "Brother", rating: "5",
+      notes: "Started at 6am to beat the heat and the queue." },
+    { place_name: "Mirissa Beach", country: "Sri Lanka", area: "Matara",
+      latitude: 5.94480, longitude: 80.45930, category: "beach",
+      visit_date: "2025-12-28", with_whom: "Friends",
+      notes: "Parrot Rock at sunset." },
+    { place_name: "Diyaluma Falls", country: "Sri Lanka", area: "Badulla",
+      latitude: 6.73280, longitude: 81.03270, category: "waterfall",
+      visit_date: "2024-07-06", with_whom: "Solo",
+      notes: "Upper pools are worth the climb. Slippery after rain." }
+  ];
+
+  // ---------- helpers ----------
+
+  const $ = (id) => document.getElementById(id);
+
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  const norm = (s) => String(s || "").trim().toLowerCase()
+    .replace(/[\s/\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+
+  function pick(row, keys) {
+    for (const k of keys) if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+    return "";
+  }
+
+  function tidyRow(raw) {
+    const row = {};
+    for (const k in raw) row[norm(k)] = raw[k];
+
+    const lat = parseFloat(pick(row, FIELDS.lat));
+    const lng = parseFloat(pick(row, FIELDS.lng));
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+
+    return {
+      place: pick(row, FIELDS.place) || "Unnamed place",
+      country: pick(row, FIELDS.country),
+      area: pick(row, FIELDS.area),
+      lat, lng,
+      category: pick(row, FIELDS.category).toLowerCase() || "other",
+      date: pick(row, FIELDS.date),
+      withWhom: pick(row, FIELDS.withWhom),
+      notes: pick(row, FIELDS.notes),
+      rating: pick(row, FIELDS.rating),
+      photo: pick(row, FIELDS.photo),
+      trip: pick(row, FIELDS.trip)
+    };
+  }
+
+  // Rows for the same spot become one place with a list of visits.
+  function group(rows) {
+    const byKey = new Map();
+
+    rows.forEach((r) => {
+      const key = norm(r.place) + "@" + r.lat.toFixed(3) + "," + r.lng.toFixed(3);
+      if (!byKey.has(key)) {
+        byKey.set(key, { place: r.place, country: r.country, area: r.area,
+                         lat: r.lat, lng: r.lng, category: r.category, visits: [] });
+      }
+      byKey.get(key).visits.push(r);
+    });
+
+    const places = [...byKey.values()];
+    places.forEach((p) => {
+      p.visits.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      p.last = p.visits[p.visits.length - 1].date || "";
+      p.years = [...new Set(p.visits.map((v) => (v.date.match(/\d{4}/) || [""])[0]).filter(Boolean))];
+      p.people = [...new Set(p.visits.flatMap((v) => v.withWhom.split(/[,;&]/).map((s) => s.trim()).filter(Boolean)))];
+    });
+    places.sort((a, b) => String(b.last).localeCompare(String(a.last)));
+    return places;
+  }
+
+  const colourOf = (cat) => CATEGORY_COLOURS[cat] || CATEGORY_COLOURS.other || "#9AA7A1";
+
+  function prettyDate(d) {
+    const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return d || "Date not recorded";
+    return new Date(+m[1], +m[2] - 1, +m[3])
+      .toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  function popupHTML(p) {
+    const where = [p.area, p.country].filter(Boolean).join(", ");
+    const total = p.visits.length;
+
+    const visits = p.visits.map((v, i) => {
+      const bits = [];
+      if (v.withWhom) bits.push("With " + esc(v.withWhom));
+      if (v.trip) bits.push(esc(v.trip));
+      if (v.rating) bits.push(esc(v.rating) + "/5");
+
+      return '<div class="visit">' +
+        '<div class="visit-when">' + esc(prettyDate(v.date)) +
+          (total > 1 ? '<small>visit ' + (i + 1) + ' of ' + total + "</small>" : "") +
+        "</div>" +
+        (bits.length ? "<p>" + bits.join(" · ") + "</p>" : "") +
+        (v.notes ? "<p>" + esc(v.notes) + "</p>" : "") +
+        (/^https?:\/\//.test(v.photo)
+          ? '<p><a href="' + esc(v.photo) + '" target="_blank" rel="noopener">Open photos</a></p>' : "") +
+        "</div>";
+    }).join("");
+
+    return '<div class="pop-name">' + esc(p.place) + "</div>" +
+           (where ? '<div class="pop-where">' + esc(where) + "</div>" : "") + visits;
+  }
+
+  // ---------- map ----------
+
+  const map = L.map("map", { zoomControl: false })
+    .setView([HOME_VIEW.lat, HOME_VIEW.lng], HOME_VIEW.zoom);
+
+  L.control.zoom({ position: "topright" }).addTo(map);
+
+  // Free basemap, no account or key needed.
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  }).addTo(map);
+
+  const cluster = L.markerClusterGroup({
+    maxClusterRadius: 45,
+    showCoverageOnHover: false
+  }).addTo(map);
+
+  // ---------- state ----------
+
+  let allPlaces = [];
+  const markerOf = new Map();
+
+  function draw(places) {
+    cluster.clearLayers();
+    markerOf.clear();
+
+    places.forEach((p, i) => {
+      const badge = p.visits.length > 1
+        ? '<span class="pin-count">' + p.visits.length + "</span>" : "";
+
+      const marker = L.marker([p.lat, p.lng], {
+        title: p.place,
+        icon: L.divIcon({
+          className: "",
+          iconSize: [17, 17],
+          iconAnchor: [8, 8],
+          popupAnchor: [0, -10],
+          html: '<div style="position:relative"><div class="pin" style="background:' +
+                colourOf(p.category) + '"></div>' + badge + "</div>"
+        })
+      }).bindPopup(popupHTML(p), { maxWidth: 300 });
+
+      markerOf.set(i, marker);
+      cluster.addLayer(marker);
+    });
+
+    drawList(places);
+    drawTally(places);
+  }
+
+  function drawTally(places) {
+    const visits = places.reduce((n, p) => n + p.visits.length, 0);
+    const countries = new Set(places.map((p) => p.country).filter(Boolean)).size;
+
+    $("tally").innerHTML =
+      "<div><b>" + places.length + "</b><span>places</span></div>" +
+      "<div><b>" + visits + "</b><span>visits</span></div>" +
+      "<div><b>" + countries + "</b><span>countries</span></div>";
+  }
+
+  function drawList(places) {
+    const list = $("list");
+
+    if (!places.length) {
+      list.innerHTML = '<p class="notice">Nothing matches these filters. Clear them to see everything again.</p>';
+      return;
+    }
+
+    list.innerHTML = places.map((p, i) => {
+      const where = [p.area, p.country].filter(Boolean).join(", ");
+      const n = p.visits.length;
+
+      return '<button class="place" data-i="' + i + '">' +
+        '<span class="place-name">' +
+          '<span class="dot" style="background:' + colourOf(p.category) + '"></span>' +
+          esc(p.place) +
+          (n > 1 ? '<span class="again">' + n + "×</span>" : "") +
+        "</span>" +
+        '<span class="place-meta">' +
+          esc(where || p.category) + " — last " + esc(prettyDate(p.last)) +
+        "</span></button>";
+    }).join("");
+
+    list.querySelectorAll(".place").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const marker = markerOf.get(+btn.dataset.i);
+        if (!marker) return;
+        map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 13), { duration: 0.7 });
+        cluster.zoomToShowLayer(marker, () => marker.openPopup());
+        if (window.matchMedia("(max-width: 46rem)").matches) showPanel(false);
+      });
+    });
+  }
+
+  // ---------- filters ----------
+
+  function fillFilter(sel, values) {
+    values.sort().forEach((v) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+      sel.appendChild(o);
+    });
+  }
+
+  function applyFilters() {
+    const q = $("q").value.trim().toLowerCase();
+    const cat = $("fCategory").value;
+    const year = $("fYear").value;
+    const who = $("fWith").value;
+
+    draw(allPlaces.filter((p) => {
+      if (cat && p.category !== cat) return false;
+      if (year && !p.years.includes(year)) return false;
+      if (who && !p.people.includes(who)) return false;
+      if (q) {
+        const hay = [p.place, p.area, p.country, p.category,
+                     ...p.visits.map((v) => v.notes + " " + v.withWhom + " " + v.trip)]
+                     .join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }));
+  }
+
+  ["q", "fCategory", "fYear", "fWith"].forEach((id) =>
+    $(id).addEventListener("input", applyFilters));
+
+  // ---------- panel toggle (small screens) ----------
+
+  function showPanel(show) {
+    $("panel").hidden = !show;
+    $("toggle").textContent = show ? "Hide list" : "Show list";
+  }
+
+  $("toggle").addEventListener("click", () => showPanel($("panel").hidden));
+  if (window.matchMedia("(max-width: 46rem)").matches) showPanel(false);
+
+  // ---------- load ----------
+
+  function start(rows, note) {
+    const clean = rows.map(tidyRow).filter(Boolean);
+
+    if (!clean.length) {
+      $("list").innerHTML = '<p class="notice">No rows had a usable latitude and longitude. ' +
+        "Check that your sheet has <code>latitude</code> and <code>longitude</code> columns with numbers in them.</p>";
+      return;
+    }
+
+    allPlaces = group(clean);
+
+    fillFilter($("fCategory"), [...new Set(allPlaces.map((p) => p.category))]);
+    fillFilter($("fYear"), [...new Set(allPlaces.flatMap((p) => p.years))]);
+    fillFilter($("fWith"), [...new Set(allPlaces.flatMap((p) => p.people))]);
+
+    draw(allPlaces);
+    map.fitBounds(L.latLngBounds(allPlaces.map((p) => [p.lat, p.lng])).pad(0.2));
+
+    if (note) $("list").insertAdjacentHTML("afterbegin", '<p class="notice">' + note + "</p>");
+  }
+
+  if (!SHEET_CSV_URL) {
+    start(SAMPLE, "These are sample places. Open this file, paste your published sheet link into " +
+                  "<code>SHEET_CSV_URL</code> near the top, and your own trips appear here.");
+  } else {
+    const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
+
+    fetch(url)
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then((text) => {
+        const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+        start(parsed.data);
+      })
+      .catch(() => {
+        $("list").innerHTML = '<p class="notice">Could not read the sheet. Two things to check: ' +
+          "the sheet is still published under File &rsaquo; Share &rsaquo; Publish to web, " +
+          "and the link ends in <code>output=csv</code>.</p>";
+      });
+  }
+})();
+</script>
