@@ -15,42 +15,65 @@
 
 <script>
 /* ============================================================
-   SETTINGS — this is the only part you need to edit.
-
-   1. In your Google Sheet:  File > Share > Publish to web
-      Choose the sheet tab, choose "Comma-separated values (.csv)",
-      click Publish, then copy the link it gives you.
-   2. Paste that link between the quotes below.
-
-   Leave it empty and the map runs on built-in sample places
-   so you can see how it works first.
+   SETTINGS — the only part you need to edit.
    ============================================================ */
 
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx0aGX_DIMCArqpJxPSYA21Vy0TF4QTm8wz0_J9z-8OI676KmGoc0lueZzGIdCpLScr6nOP-Rjrm5g/pub?gid=0&single=true&output=csv";
+// File > Share > Publish to web > pick your tab > CSV > Publish, then paste here.
+const SHEET_CSV_URL = "";
+
+// Which row of the sheet holds the column names. Data starts on the next row.
+const HEADER_ROW = 2;
 
 // Where the map opens before it knows your places.
-const HOME_VIEW = { lat: 7.30, lng: 80.65, zoom: 8 };   // Sri Lanka
+const HOME_VIEW = { lat: 7.30, lng: 80.65, zoom: 8 };
 
-// Which row in the sheet holds the column names. Data starts on the row after it.
-const HEADER_ROW = 3;   
-
-// Pin colours per category. Add your own; anything unlisted gets a default.
+// Pin colours. The key must match what you type in the category column.
 const CATEGORY_COLOURS = {
-  temple:     "#E8A33D",
-  beach:      "#48B8C4",
-  hike:       "#7FB069",
-  waterfall:  "#5C9EAD",
-  city:       "#D77A61",
-  restaurant: "#C9639A",
-  hotel:      "#8E7CC3",
-  museum:     "#B3925A",
-  park:       "#6AA84F",
-  university:  "#4F86D6",
-  supermarket: "#E4693F",
-  gym:         "#A3B54A",
+  temple:       "#E8A33D",
+  beach:        "#48B8C4",
+  hike:         "#7FB069",
+  waterfall:    "#5C9EAD",
+  city:         "#D77A61",
+  restaurant:   "#C9639A",
+  hotel:        "#8E7CC3",
+  museum:       "#B3925A",
+  park:         "#6AA84F",
+  university:   "#4F86D6",
+  supermarket:  "#E4693F",
+  gym:          "#A3B54A",
   mall:         "#7A9CC6",
   friends_home: "#D98CA5",
-  other:       "#9AA7A1"
+  other:        "#9AA7A1"
+};
+
+/* Countries you want a coverage score for.
+   upper/lower are what that country calls its two admin levels.
+   Add another country the same way and it starts counting. */
+const COVERAGE = {
+  "Sri Lanka": {
+    upper: "province",
+    lower: "district",
+    regions: {
+      "Western":       ["Colombo", "Gampaha", "Kalutara"],
+      "Central":       ["Kandy", "Matale", "Nuwara Eliya"],
+      "Southern":      ["Galle", "Matara", "Hambantota"],
+      "Northern":      ["Jaffna", "Kilinochchi", "Mannar", "Vavuniya", "Mullaitivu"],
+      "Eastern":       ["Batticaloa", "Ampara", "Trincomalee"],
+      "North Western": ["Kurunegala", "Puttalam"],
+      "North Central": ["Anuradhapura", "Polonnaruwa"],
+      "Uva":           ["Badulla", "Monaragala"],
+      "Sabaragamuwa":  ["Ratnapura", "Kegalle"]
+    }
+  }
+};
+
+// Spellings that mean the same place, so a variant still counts.
+const NAME_FIXES = {
+  moneragala: "monaragala",
+  mullaithivu: "mullaitivu",
+  mulaitivu: "mullaitivu",
+  killinochchi: "kilinochchi",
+  trincomallee: "trincomalee"
 };
 </script>
 
@@ -83,8 +106,6 @@ const CATEGORY_COLOURS = {
     background: var(--ink);
   }
 
-  /* ---------- panel ---------- */
-
   .panel {
     position: absolute;
     top: 0; left: 0; bottom: 0;
@@ -110,12 +131,7 @@ const CATEGORY_COLOURS = {
     letter-spacing: -0.015em;
   }
 
-  .tally {
-    display: flex;
-    gap: 1.4rem;
-    margin-top: 1rem;
-  }
-
+  .tally { display: flex; gap: 1.4rem; margin-top: 1rem; }
   .tally div { line-height: 1.15; }
 
   .tally b {
@@ -126,12 +142,7 @@ const CATEGORY_COLOURS = {
     color: var(--marigold);
   }
 
-  .tally span {
-    font-size: 0.75rem;
-    color: var(--paper-dim);
-  }
-
-  /* ---------- filters ---------- */
+  .tally span { font-size: 0.75rem; color: var(--paper-dim); }
 
   .filters {
     padding: 1rem 1.5rem;
@@ -140,11 +151,7 @@ const CATEGORY_COLOURS = {
     gap: 0.55rem;
   }
 
-  .filters-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.55rem;
-  }
+  .filters-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; }
 
   input, select {
     width: 100%;
@@ -169,18 +176,72 @@ const CATEGORY_COLOURS = {
     padding-right: 1.7rem;
   }
 
-  :focus-visible {
-    outline: 2px solid var(--marigold);
-    outline-offset: 1px;
+  :focus-visible { outline: 2px solid var(--marigold); outline-offset: 1px; }
+
+  .body { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+
+  .cov { border-bottom: 1px solid var(--line); }
+
+  .cov summary {
+    padding: 0.9rem 1.5rem;
+    cursor: pointer;
+    list-style: none;
+    display: grid;
+    gap: 0.4rem;
   }
 
-  /* ---------- list ---------- */
+  .cov summary::-webkit-details-marker { display: none; }
 
-  .list {
-    flex: 1;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  .cov-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+    font-weight: 700;
   }
+
+  .cov-line em {
+    font-style: normal;
+    font-weight: 400;
+    font-size: 0.78rem;
+    text-align: right;
+    color: var(--paper-dim);
+  }
+
+  .bar { display: block; height: 3px; background: var(--line); border-radius: 3px; }
+  .bar i { display: block; height: 100%; background: var(--marigold); border-radius: 3px; }
+
+  .region { padding: 0 1.5rem 0.35rem; }
+
+  .region h3 {
+    margin: 0.7rem 0 0.35rem;
+    font-family: Fraunces, Georgia, serif;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--paper-dim);
+  }
+
+  .region h3.seen { color: var(--paper); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+  .chip {
+    font-size: 0.73rem;
+    padding: 0.14rem 0.45rem;
+    border-radius: 0.9rem;
+    border: 1px solid var(--line);
+    color: var(--paper-dim);
+  }
+
+  .chip.seen {
+    background: var(--marigold);
+    border-color: var(--marigold);
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .flag { margin: 0; padding: 0.7rem 1.5rem 1rem; font-size: 0.76rem; color: var(--marigold); }
 
   .place {
     display: block;
@@ -205,19 +266,9 @@ const CATEGORY_COLOURS = {
     gap: 0.45rem;
   }
 
-  .dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    flex: none;
-    transform: translateY(-1px);
-  }
+  .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; flex: none; transform: translateY(-1px); }
 
-  .place-meta {
-    margin-top: 0.2rem;
-    font-size: 0.78rem;
-    color: var(--paper-dim);
-  }
+  .place-meta { margin-top: 0.2rem; font-size: 0.78rem; color: var(--paper-dim); }
 
   .again {
     font-size: 0.7rem;
@@ -229,20 +280,8 @@ const CATEGORY_COLOURS = {
     margin-left: auto;
   }
 
-  .notice {
-    padding: 1.5rem;
-    font-size: 0.87rem;
-    line-height: 1.55;
-    color: var(--paper-dim);
-  }
-
-  .notice code {
-    font-size: 0.8rem;
-    color: var(--marigold);
-    word-break: break-all;
-  }
-
-  /* ---------- pins ---------- */
+  .notice { padding: 1.5rem; font-size: 0.87rem; line-height: 1.55; color: var(--paper-dim); }
+  .notice code { font-size: 0.8rem; color: var(--marigold); word-break: break-all; }
 
   .pin {
     width: 1.05rem;
@@ -268,10 +307,7 @@ const CATEGORY_COLOURS = {
     text-align: center;
   }
 
-  .marker-cluster {
-    background: rgba(232, 163, 61, 0.28);
-    border-radius: 50%;
-  }
+  .marker-cluster { background: rgba(232, 163, 61, 0.28); border-radius: 50%; }
 
   .marker-cluster div {
     width: 1.9rem;
@@ -284,14 +320,7 @@ const CATEGORY_COLOURS = {
     text-align: center;
   }
 
-  /* ---------- popup ---------- */
-
-  .leaflet-popup-content-wrapper {
-    background: var(--ink);
-    color: var(--paper);
-    border-radius: 0.5rem;
-  }
-
+  .leaflet-popup-content-wrapper { background: var(--ink); color: var(--paper); border-radius: 0.5rem; }
   .leaflet-popup-tip { background: var(--ink); }
 
   .leaflet-popup-content {
@@ -308,34 +337,13 @@ const CATEGORY_COLOURS = {
     line-height: 1.15;
   }
 
-  .pop-where {
-    color: var(--paper-dim);
-    font-size: 0.78rem;
-    margin-top: 0.15rem;
-  }
+  .pop-where { color: var(--paper-dim); font-size: 0.78rem; margin-top: 0.15rem; }
 
-  .visit {
-    border-top: 1px solid var(--line);
-    margin-top: 0.7rem;
-    padding-top: 0.6rem;
-  }
-
-  .visit-when {
-    font-weight: 700;
-    color: var(--marigold);
-  }
-
-  .visit-when small {
-    font-weight: 400;
-    color: var(--paper-dim);
-    margin-left: 0.35rem;
-  }
-
+  .visit { border-top: 1px solid var(--line); margin-top: 0.7rem; padding-top: 0.6rem; }
+  .visit-when { font-weight: 700; color: var(--marigold); }
+  .visit-when small { font-weight: 400; color: var(--paper-dim); margin-left: 0.35rem; }
   .visit p { margin: 0.15rem 0 0; }
-
   .visit a { color: var(--marigold); }
-
-  /* ---------- mobile ---------- */
 
   .toggle {
     display: none;
@@ -367,11 +375,7 @@ const CATEGORY_COLOURS = {
       transition: transform 0.22s ease;
     }
 
-    .panel[hidden] {
-      display: flex;
-      transform: translateY(100%);
-    }
-
+    .panel[hidden] { display: flex; transform: translateY(100%); }
     .toggle { display: block; }
     .panel-head { padding-top: 1.1rem; }
   }
@@ -393,11 +397,16 @@ const CATEGORY_COLOURS = {
       <select id="fCategory"><option value="">All kinds</option></select>
       <select id="fYear"><option value="">All years</option></select>
     </div>
+    <div class="filters-row">
+      <select id="fUpper"><option value="">All provinces</option></select>
+      <select id="fLower"><option value="">All districts</option></select>
+    </div>
     <select id="fWith"><option value="">Anyone</option></select>
   </div>
 
-  <div class="list" id="list">
-    <p class="notice">Loading your places…</p>
+  <div class="body">
+    <div id="coverage"></div>
+    <div id="list"><p class="notice">Loading your places…</p></div>
   </div>
 </div>
 
@@ -408,47 +417,44 @@ const CATEGORY_COLOURS = {
 (function () {
   "use strict";
 
-  // ---------- column names this page understands ----------
-
   const FIELDS = {
     place:    ["place_name", "place", "name"],
     country:  ["country"],
-    area:     ["area", "city", "city_area", "region", "district"],
+    upper:    ["province", "state", "region", "admin1"],
+    lower:    ["district", "county", "prefecture", "admin2"],
+    area:     ["area", "city", "city_area", "town", "suburb"],
     lat:      ["latitude", "lat"],
     lng:      ["longitude", "lng", "lon", "long"],
     category: ["category", "kind", "type"],
     date:     ["visit_date", "date", "visited"],
     withWhom: ["with_whom", "with", "companions", "people"],
-    notes:    ["notes", "note", "comment", "comments", "visit_notes"],
+    notes:    ["visit_notes", "notes", "note", "comment", "comments"],
     rating:   ["rating", "score"],
     photo:    ["photo_link", "photo", "photos", "photo_url", "link"],
     trip:     ["trip_name", "trip"]
   };
 
   const SAMPLE = [
-    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", area: "Kandy",
-      latitude: 7.29379, longitude: 80.64127, category: "temple",
-      visit_date: "2023-04-14", with_whom: "Family", rating: "5",
-      notes: "Evening thevava. Arrived an hour early for a spot near the front." },
-    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", area: "Kandy",
-      latitude: 7.29379, longitude: 80.64127, category: "temple",
-      visit_date: "2025-08-02", with_whom: "Chamodya, Randika",
-      notes: "Second time. Quieter on a weekday morning." },
-    { place_name: "Sigiriya", country: "Sri Lanka", area: "Matale",
+    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", province: "Central",
+      district: "Kandy", area: "Kandy", latitude: 7.29379, longitude: 80.64127,
+      category: "temple", visit_date: "2023-04-14", with_whom: "Family", rating: "5",
+      visit_notes: "Evening thevava. Arrived an hour early for a spot near the front." },
+    { place_name: "Sri Dalada Maligawa", country: "Sri Lanka", province: "Central",
+      district: "Kandy", area: "Kandy", latitude: 7.29379, longitude: 80.64127,
+      category: "temple", visit_date: "2025-08-02", with_whom: "Chamodya, Randika",
+      visit_notes: "Second time. Quieter on a weekday morning." },
+    { place_name: "Sigiriya", country: "Sri Lanka", province: "Central", district: "Matale",
       latitude: 7.95700, longitude: 80.75980, category: "hike",
       visit_date: "2024-01-20", with_whom: "Brother", rating: "5",
-      notes: "Started at 6am to beat the heat and the queue." },
-    { place_name: "Mirissa Beach", country: "Sri Lanka", area: "Matara",
+      visit_notes: "Started at 6am to beat the heat and the queue." },
+    { place_name: "Mirissa Beach", country: "Sri Lanka", province: "Southern", district: "Matara",
       latitude: 5.94480, longitude: 80.45930, category: "beach",
-      visit_date: "2025-12-28", with_whom: "Friends",
-      notes: "Parrot Rock at sunset." },
-    { place_name: "Diyaluma Falls", country: "Sri Lanka", area: "Badulla",
+      visit_date: "2025-12-28", with_whom: "Friends", visit_notes: "Parrot Rock at sunset." },
+    { place_name: "Diyaluma Falls", country: "Sri Lanka", province: "Uva", district: "Badulla",
       latitude: 6.73280, longitude: 81.03270, category: "waterfall",
       visit_date: "2024-07-06", with_whom: "Solo",
-      notes: "Upper pools are worth the climb. Slippery after rain." }
+      visit_notes: "Upper pools are worth the climb. Slippery after rain." }
   ];
-
-  // ---------- helpers ----------
 
   const $ = (id) => document.getElementById(id);
 
@@ -457,6 +463,14 @@ const CATEGORY_COLOURS = {
 
   const norm = (s) => String(s || "").trim().toLowerCase()
     .replace(/[\s/\-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+
+  // "Nuwara Eliya District", "nuwara-eliya" and "NUWARA ELIYA" all become one key.
+  function key(s) {
+    const k = String(s || "").toLowerCase()
+      .replace(/\b(district|province|state|region|county)\b/g, "")
+      .replace(/[^a-z0-9]/g, "");
+    return NAME_FIXES[k] || k;
+  }
 
   function pick(row, keys) {
     for (const k of keys) if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
@@ -474,9 +488,11 @@ const CATEGORY_COLOURS = {
     return {
       place: pick(row, FIELDS.place) || "Unnamed place",
       country: pick(row, FIELDS.country),
+      upper: pick(row, FIELDS.upper),
+      lower: pick(row, FIELDS.lower),
       area: pick(row, FIELDS.area),
       lat, lng,
-      category: pick(row, FIELDS.category).toLowerCase() || "other",
+      category: norm(pick(row, FIELDS.category)) || "other",
       date: pick(row, FIELDS.date),
       withWhom: pick(row, FIELDS.withWhom),
       notes: pick(row, FIELDS.notes),
@@ -486,17 +502,16 @@ const CATEGORY_COLOURS = {
     };
   }
 
-  // Rows for the same spot become one place with a list of visits.
   function group(rows) {
     const byKey = new Map();
 
     rows.forEach((r) => {
-      const key = norm(r.place) + "@" + r.lat.toFixed(3) + "," + r.lng.toFixed(3);
-      if (!byKey.has(key)) {
-        byKey.set(key, { place: r.place, country: r.country, area: r.area,
-                         lat: r.lat, lng: r.lng, category: r.category, visits: [] });
+      const k = norm(r.place) + "@" + r.lat.toFixed(3) + "," + r.lng.toFixed(3);
+      if (!byKey.has(k)) {
+        byKey.set(k, { place: r.place, country: r.country, upper: r.upper, lower: r.lower,
+                       area: r.area, lat: r.lat, lng: r.lng, category: r.category, visits: [] });
       }
-      byKey.get(key).visits.push(r);
+      byKey.get(k).visits.push(r);
     });
 
     const places = [...byKey.values()];
@@ -504,7 +519,8 @@ const CATEGORY_COLOURS = {
       p.visits.sort((a, b) => String(a.date).localeCompare(String(b.date)));
       p.last = p.visits[p.visits.length - 1].date || "";
       p.years = [...new Set(p.visits.map((v) => (v.date.match(/\d{4}/) || [""])[0]).filter(Boolean))];
-      p.people = [...new Set(p.visits.flatMap((v) => v.withWhom.split(/[,;&]/).map((s) => s.trim()).filter(Boolean)))];
+      p.people = [...new Set(p.visits.flatMap((v) =>
+        v.withWhom.split(/[,;&]/).map((s) => s.trim()).filter(Boolean)))];
     });
     places.sort((a, b) => String(b.last).localeCompare(String(a.last)));
     return places;
@@ -520,7 +536,7 @@ const CATEGORY_COLOURS = {
   }
 
   function popupHTML(p) {
-    const where = [p.area, p.country].filter(Boolean).join(", ");
+    const where = [p.area, p.lower, p.upper, p.country].filter(Boolean).join(", ");
     const total = p.visits.length;
 
     const visits = p.visits.map((v, i) => {
@@ -531,9 +547,9 @@ const CATEGORY_COLOURS = {
 
       return '<div class="visit">' +
         '<div class="visit-when">' + esc(prettyDate(v.date)) +
-          (total > 1 ? '<small>visit ' + (i + 1) + ' of ' + total + "</small>" : "") +
+          (total > 1 ? "<small>visit " + (i + 1) + " of " + total + "</small>" : "") +
         "</div>" +
-        (bits.length ? "<p>" + bits.join(" · ") + "</p>" : "") +
+        (bits.length ? "<p>" + bits.join(" &middot; ") + "</p>" : "") +
         (v.notes ? "<p>" + esc(v.notes) + "</p>" : "") +
         (/^https?:\/\//.test(v.photo)
           ? '<p><a href="' + esc(v.photo) + '" target="_blank" rel="noopener">Open photos</a></p>' : "") +
@@ -556,12 +572,7 @@ const CATEGORY_COLOURS = {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
 
-  const cluster = L.markerClusterGroup({
-    maxClusterRadius: 45,
-    showCoverageOnHover: false
-  }).addTo(map);
-
-  // ---------- state ----------
+  const cluster = L.markerClusterGroup({ maxClusterRadius: 45, showCoverageOnHover: false }).addTo(map);
 
   let allPlaces = [];
   const markerOf = new Map();
@@ -571,8 +582,7 @@ const CATEGORY_COLOURS = {
     markerOf.clear();
 
     places.forEach((p, i) => {
-      const badge = p.visits.length > 1
-        ? '<span class="pin-count">' + p.visits.length + "</span>" : "";
+      const badge = p.visits.length > 1 ? '<span class="pin-count">' + p.visits.length + "</span>" : "";
 
       const marker = L.marker([p.lat, p.lng], {
         title: p.place,
@@ -596,12 +606,13 @@ const CATEGORY_COLOURS = {
 
   function drawTally(places) {
     const visits = places.reduce((n, p) => n + p.visits.length, 0);
-    const countries = new Set(places.map((p) => p.country).filter(Boolean)).size;
+    const districts = new Set(places.filter((p) => p.lower)
+      .map((p) => p.country + "/" + key(p.lower))).size;
 
     $("tally").innerHTML =
       "<div><b>" + places.length + "</b><span>places</span></div>" +
       "<div><b>" + visits + "</b><span>visits</span></div>" +
-      "<div><b>" + countries + "</b><span>countries</span></div>";
+      "<div><b>" + districts + "</b><span>districts</span></div>";
   }
 
   function drawList(places) {
@@ -613,18 +624,16 @@ const CATEGORY_COLOURS = {
     }
 
     list.innerHTML = places.map((p, i) => {
-      const where = [p.area, p.country].filter(Boolean).join(", ");
+      const where = [p.area || p.lower, p.country].filter(Boolean).join(", ");
       const n = p.visits.length;
 
       return '<button class="place" data-i="' + i + '">' +
         '<span class="place-name">' +
           '<span class="dot" style="background:' + colourOf(p.category) + '"></span>' +
-          esc(p.place) +
-          (n > 1 ? '<span class="again">' + n + "×</span>" : "") +
+          esc(p.place) + (n > 1 ? '<span class="again">' + n + "&times;</span>" : "") +
         "</span>" +
-        '<span class="place-meta">' +
-          esc(where || p.category) + " — last " + esc(prettyDate(p.last)) +
-        "</span></button>";
+        '<span class="place-meta">' + esc(where || p.category) +
+          " &mdash; last " + esc(prettyDate(p.last)) + "</span></button>";
     }).join("");
 
     list.querySelectorAll(".place").forEach((btn) => {
@@ -638,10 +647,69 @@ const CATEGORY_COLOURS = {
     });
   }
 
+  // ---------- coverage ----------
+
+  function drawCoverage(places) {
+    const seen = new Map();
+
+    places.forEach((p) => {
+      const c = p.country || "Unlisted";
+      if (!seen.has(c)) seen.set(c, { upper: new Set(), lower: new Set() });
+      if (p.upper) seen.get(c).upper.add(key(p.upper));
+      if (p.lower) seen.get(c).lower.add(key(p.lower));
+    });
+
+    const blocks = [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([country, got]) => {
+      const cfg = COVERAGE[country];
+
+      if (!cfg) {
+        return '<details class="cov"><summary><span class="cov-line">' + esc(country) +
+          "<em>" + got.lower.size + " areas in " + got.upper.size + " regions</em>" +
+          "</span></summary></details>";
+      }
+
+      const all = Object.entries(cfg.regions);
+      const totalLower = all.reduce((n, [, ds]) => n + ds.length, 0);
+      const known = new Set(all.flatMap(([, ds]) => ds.map(key)));
+
+      let hitLower = 0, hitUpper = 0;
+
+      const body = all.map(([region, districts]) => {
+        const chips = districts.map((d) => {
+          const on = got.lower.has(key(d));
+          if (on) hitLower++;
+          return '<span class="chip' + (on ? " seen" : "") + '">' + esc(d) + "</span>";
+        }).join("");
+
+        const regionSeen = districts.some((d) => got.lower.has(key(d))) || got.upper.has(key(region));
+        if (regionSeen) hitUpper++;
+
+        return '<div class="region"><h3 class="' + (regionSeen ? "seen" : "") + '">' +
+               esc(region) + '</h3><div class="chips">' + chips + "</div></div>";
+      }).join("");
+
+      const odd = [...got.lower].filter((k) => k && !known.has(k));
+      const flag = odd.length
+        ? '<p class="flag">Not on the ' + esc(cfg.lower) + " list: " + esc(odd.join(", ")) +
+          ". Check the spelling in your sheet.</p>"
+        : "";
+
+      const pct = Math.round((hitLower / totalLower) * 100);
+
+      return '<details class="cov"><summary><span class="cov-line">' + esc(country) +
+        "<em>" + hitLower + " of " + totalLower + " " + esc(cfg.lower) + "s, " +
+        hitUpper + " of " + all.length + " " + esc(cfg.upper) + "s</em></span>" +
+        '<span class="bar"><i style="width:' + pct + '%"></i></span></summary>' +
+        body + flag + "</details>";
+    });
+
+    $("coverage").innerHTML = blocks.join("");
+  }
+
   // ---------- filters ----------
 
   function fillFilter(sel, values) {
-    values.sort().forEach((v) => {
+    values.filter(Boolean).sort().forEach((v) => {
       const o = document.createElement("option");
       o.value = v;
       o.textContent = v.charAt(0).toUpperCase() + v.slice(1);
@@ -654,13 +722,17 @@ const CATEGORY_COLOURS = {
     const cat = $("fCategory").value;
     const year = $("fYear").value;
     const who = $("fWith").value;
+    const up = $("fUpper").value;
+    const low = $("fLower").value;
 
     draw(allPlaces.filter((p) => {
       if (cat && p.category !== cat) return false;
       if (year && !p.years.includes(year)) return false;
       if (who && !p.people.includes(who)) return false;
+      if (up && p.upper !== up) return false;
+      if (low && p.lower !== low) return false;
       if (q) {
-        const hay = [p.place, p.area, p.country, p.category,
+        const hay = [p.place, p.area, p.lower, p.upper, p.country, p.category,
                      ...p.visits.map((v) => v.notes + " " + v.withWhom + " " + v.trip)]
                      .join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
@@ -669,10 +741,8 @@ const CATEGORY_COLOURS = {
     }));
   }
 
-  ["q", "fCategory", "fYear", "fWith"].forEach((id) =>
-    $(id).addEventListener("input", applyFilters));
-
-  // ---------- panel toggle (small screens) ----------
+  ["q", "fCategory", "fYear", "fWith", "fUpper", "fLower"]
+    .forEach((id) => $(id).addEventListener("input", applyFilters));
 
   function showPanel(show) {
     $("panel").hidden = !show;
@@ -689,7 +759,8 @@ const CATEGORY_COLOURS = {
 
     if (!clean.length) {
       $("list").innerHTML = '<p class="notice">No rows had a usable latitude and longitude. ' +
-        "Check that your sheet has <code>latitude</code> and <code>longitude</code> columns with numbers in them.</p>";
+        "Check that <code>HEADER_ROW</code> matches the row your column names sit on, and that " +
+        "<code>latitude</code> and <code>longitude</code> hold plain numbers.</p>";
       return;
     }
 
@@ -698,37 +769,41 @@ const CATEGORY_COLOURS = {
     fillFilter($("fCategory"), [...new Set(allPlaces.map((p) => p.category))]);
     fillFilter($("fYear"), [...new Set(allPlaces.flatMap((p) => p.years))]);
     fillFilter($("fWith"), [...new Set(allPlaces.flatMap((p) => p.people))]);
+    fillFilter($("fUpper"), [...new Set(allPlaces.map((p) => p.upper))]);
+    fillFilter($("fLower"), [...new Set(allPlaces.map((p) => p.lower))]);
 
     draw(allPlaces);
+    drawCoverage(allPlaces);
     map.fitBounds(L.latLngBounds(allPlaces.map((p) => [p.lat, p.lng])).pad(0.2));
 
     if (note) $("list").insertAdjacentHTML("afterbegin", '<p class="notice">' + note + "</p>");
   }
 
+  function toObjects(text) {
+    const rows = Papa.parse(text, { skipEmptyLines: false }).data;
+    const table = rows.slice(HEADER_ROW - 1).filter((r) => r.some((c) => String(c).trim() !== ""));
+    const head = (table.shift() || []).map((h) => String(h).trim());
+
+    return table.map((cells) => {
+      const row = {};
+      head.forEach((h, i) => { if (h) row[h] = cells[i]; });
+      return row;
+    });
+  }
+
   if (!SHEET_CSV_URL) {
-    start(SAMPLE, "These are sample places. Open this file, paste your published sheet link into " +
-                  "<code>SHEET_CSV_URL</code> near the top, and your own trips appear here.");
+    start(SAMPLE, "These are sample places. Paste your published sheet link into " +
+                  "<code>SHEET_CSV_URL</code> near the top of this file to see your own.");
   } else {
     const url = SHEET_CSV_URL + (SHEET_CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
 
     fetch(url)
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.text(); })
-      .then((text) => {
-        const rows = Papa.parse(text, { skipEmptyLines: false }).data;
-        const table = rows.slice(HEADER_ROW - 1)
-                          .filter((r) => r.some((c) => String(c).trim() !== ""));
-        const head = (table.shift() || []).map((h) => String(h).trim());
-
-        start(table.map((cells) => {
-          const row = {};
-          head.forEach((h, i) => { if (h) row[h] = cells[i]; });
-          return row;
-        }));
-      })
+      .then((text) => start(toObjects(text)))
       .catch(() => {
-        $("list").innerHTML = '<p class="notice">Could not read the sheet. Two things to check: ' +
-          "the sheet is still published under File &rsaquo; Share &rsaquo; Publish to web, " +
-          "and the link ends in <code>output=csv</code>.</p>";
+        $("list").innerHTML = '<p class="notice">Could not read the sheet. Check that it is still ' +
+          "published under File &rsaquo; Share &rsaquo; Publish to web, and that the link ends in " +
+          "<code>output=csv</code>.</p>";
       });
   }
 })();
